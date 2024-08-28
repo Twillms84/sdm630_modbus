@@ -6,18 +6,46 @@ namespace sdm630_modbus {
 
 static const char *TAG = "sdm630_modbus.component";
 
-uint8_t registers[160]; // Speicher für die Register
-
 // Setup-Methode
 void SDM630Modbus::setup() {
     if (this->flow_control_pin_ != nullptr) {
         this->flow_control_pin_->setup();
+        this->flow_control_pin_->digital_write(false); // TXE auf LOW
     }
-    modbus_state = MODBUS_STATE_IDLE;
-    // Erstellen des Tasks für task_iv
+    this->init();
+    
+    if (ivHandle != nullptr) {
+        ESP_LOGI(TAG, "Deleting existing task");
+        vTaskDelete(ivHandle);
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(1)); // Verzögerung hinzufügen
+
+    ESP_LOGI(TAG, "Creating Modbus IV task");
+    if (xTaskCreate(task_iv_static, "ModbusIV", 5000, this, 1, &ivHandle) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Modbus IV task");
+    }
     xTaskCreate(task_iv_static, "ModbusIV", 5000, this, 1, &ivHandle);
 }
 
+void SDM630Modbus::init() {
+    ESP_LOGI(TAG, "Initialization called");
+    this->modbus_reset();  // Füge den Reset-Aufruf hinzu
+}
+
+void SDM630Modbus::modbus_reset() {
+	// reset the Modbus pointer and set to read
+	modbus_state=MODBUS_STATE_IDLE;
+	modbus_in_buffer_ptr=0;
+	modbus_crc_init(&modbus_crc16);
+}
+
+void SDM630Modbus::modbus_rest(void)
+{
+	modbus_rest_delay=((50000)/9600)+2; // 5 Chars 10 Bits for ms (1000/s)+ 2ms
+	modbus_state=MODBUS_STATE_REST;
+	modbus_rest_time=millis()+modbus_rest_delay;
+}
 
 // Statische Methode für den FreeRTOS-Task
 void SDM630Modbus::task_iv_static(void *parameter) {
@@ -84,7 +112,6 @@ void SDM630Modbus::task_iv() {
 	static uint32_t last_millis=millis();
 
     while(1) {
-        ESP_LOGE(TAG, "WHILE SCHLEIFE GESTARTET");
         vTaskDelay(pdMS_TO_TICKS(1));
     
         if(last_millis!=millis()) {
@@ -110,8 +137,6 @@ void SDM630Modbus::task_iv() {
                     modbus_time_cnt_1 = MODBUS_RX_TIMEOUT;
                     modbus_in1_ptr = 0;
 				    modbus_crc_init(&modbus_crc16_1);
-				    ESP_LOGD(TAG, "CRC Initialized to: %04X\n", modbus_crc16_1);
-
                 }
                 break;
         
@@ -124,7 +149,6 @@ void SDM630Modbus::task_iv() {
 
                 if (this->available()) {
                     uint8_t c = this->read();
-                    ESP_LOGD(TAG,"Received Byte: %02X", c);
                     modbus_time_cnt_1 = MODBUS_RX_TIMEOUT;
 
                     if (modbus_in1_ptr >= sizeof(modbus_in1_buf)) {
@@ -141,7 +165,6 @@ void SDM630Modbus::task_iv() {
                         ESP_LOGD(TAG,"Wrong Command\n\r");
                         modbus_in1_ptr = 0;
                         modbus_crc_init(&modbus_crc16_1);
-                        ESP_LOGD(TAG, "CRC Initialized in ReAD STATE to: %04X\n", modbus_crc16_1);
                         break;
                     }
 
@@ -155,11 +178,7 @@ void SDM630Modbus::task_iv() {
                         uint16_t res_crc = modbus_in1_buf[6];
                         res_crc |= modbus_in1_buf[7] << 8;
 
-                        ESP_LOGD(TAG,"Received CRC: %04X\n", res_crc);
-                        ESP_LOGD(TAG,"Calculated CRC: %04X\n", modbus_crc16_1);
-
                         if (res_crc == modbus_crc16_1) {
-                            ESP_LOGE(TAG, "Res = calculated cRC Value");
                             if (modbus_in1_buf[1] == MODBUS_FC_READ_REGS || modbus_in1_buf[1] == MODBUS_FC_READ_INPUT_REGS) {
                                 addr = (modbus_in1_buf[2] << 8) + modbus_in1_buf[3];
                                 wr_len = (modbus_in1_buf[4] << 8) + modbus_in1_buf[5];
@@ -179,10 +198,7 @@ void SDM630Modbus::task_iv() {
                         }
                     }
                 }
-             break;
-
-
-
+            break;
 
             case MODBUS_STATE_WRITE:
                 if (!modbus_time_cnt_1) {
@@ -202,6 +218,8 @@ void SDM630Modbus::task_iv() {
         		modbus_uart1_send(0x01); // ID of SDM630
 	        	modbus_uart1_send(modbus_in1_buf[1]); // functioncode
 		        modbus_uart1_send(wr_len*2); // addr high
+                
+    			modbus_timer_1=millis()+((10000*((wr_len*2)+5))/9600)+MODBUS_READ_DELAY;
 
                 while (wr_len) {
                     switch (addr) {
@@ -241,10 +259,8 @@ void SDM630Modbus::task_iv() {
                 addr++;
                 wr_len--;
             }
-            uint8_t crc_high = modbus_crc16_1 & 0x00FF;
-            uint8_t crc_low = modbus_crc16_1 >> 8;
-            this->write_array(crc_high); // crc high
-		    this->write_array(crc_low; // crc low
+            this->write((modbus_crc16_1 & 0x00FF)); // crc high
+		    this->write((modbus_crc16_1>>8)); // crc low
             // Nächsten Zustand setzen
             modbus_state = MODBUS_STATE_DELAY_TO_IDLE;
             }
@@ -274,10 +290,8 @@ uint8_t SDM630Modbus::read() {
 
 void SDM630Modbus::modbus_uart1_send(uint8_t data)
 {
-    uint8_t byteArray[1] = { data };
-
 	modbus_crc_add(data,&modbus_crc16_1);
-	this->write_array(byteArray, sizeof(byteArray));
+	this->write(data);
 }
 
 }

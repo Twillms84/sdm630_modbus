@@ -9,15 +9,19 @@
 
 // Modbus-Zustandsdefinitionen
 #define MODBUS_STATE_IDLE 0
-#define MODBUS_STATE_CLEAR 1
-#define MODBUS_STATE_READ 2
-#define MODBUS_STATE_WRITE 3
-#define MODBUS_STATE_DELAY_TO_IDLE 4
+#define MODBUS_STATE_IDLE			0
+#define MODBUS_STATE_READ			1
+#define MODBUS_STATE_REST   		2
+#define MODBUS_STATE_WRITE_DELAY 	3
+#define MODBUS_STATE_WRITE			4
+#define MODBUS_STATE_DELAY_TO_IDLE	5
+#define MODBUS_STATE_CLEAR			6
+
 
 // Timeout- und Delay-Werte
-#define MODBUS_RX_TIMEOUT 50          // Empfangs-Timeout
-#define MODBUS_READ_DELAY 100         // Lese-Delay
-#define MODBUS_WRITE_DELAY 10         // Schreib-Delay
+#define MODBUS_RX_TIMEOUT 200          // Empfangs-Timeout
+#define MODBUS_READ_DELAY 3         // Lese-Delay
+#define MODBUS_WRITE_DELAY 3         // Schreib-Delay
 #define MODBUS_FC_READ_INPUT_REGS 0x04  // Funktion zum Lesen der Eingangsregister
 #define MODBUS_FC_READ_REGS			0x03
 
@@ -33,10 +37,12 @@ class SDM630Modbus : public uart::UARTDevice, public Component {
   // Methoden, die von der Basisklasse überschrieben werden
   void setup() override; // Initialisierung
   void loop() override;  // Periodische Aufgaben
- 
+  void modbus_reset();  // Methode zum Zurücksetzen
+  void modbus_rest();
   // Methoden zum Verarbeiten von Anfragen und MQTT-Nachrichten
   void handleInverter();
   void task_iv();
+  void init();
 
   // Fügt einen Wert in das Register ein
   void insert_into_register(uint8_t startAddress, float value);
@@ -57,7 +63,8 @@ class SDM630Modbus : public uart::UARTDevice, public Component {
   std::vector<uint8_t> rx_buffer; // Puffer für eingehende Daten
 
  private:
-
+  uint32_t modbus_rest_delay=0;
+  uint32_t modbus_rest_time=0;
   // Private Methoden und Member-Variablen
   static void task_iv_static(void *parameter); // Statische Methode für den Task
   TaskHandle_t ivHandle; // Handle für den FreeRTOS-Task
@@ -94,6 +101,8 @@ class SDM630Modbus : public uart::UARTDevice, public Component {
   uint32_t modbus_timer_1 = 0;
   size_t wr_len = 0;
   uint32_t last_millis = 0;
+  uint16_t modbus_in_buffer_ptr;
+
   
   // Globale Variablen
   float v_sum;
