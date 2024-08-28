@@ -141,64 +141,84 @@ void SDM630Modbus::task_iv() {
                 break;
         
             case MODBUS_STATE_READ:
-                if (!modbus_time_cnt_1) {
-                ESP_LOGD(TAG,"TO-Error IV\n\r");
-                modbus_state = MODBUS_STATE_IDLE;
-                break;
-                }
+					if(!modbus_time_cnt_1)
+					{
+						// timeout for read
+						ESP_LOGD(TAG, "TO-Error IV\n\r");
+						modbus_state=MODBUS_STATE_IDLE; // next try to get data
+						break;
+					}
 
-                if (this->available()) {
-                    uint8_t c = this->read();
-                    modbus_time_cnt_1 = MODBUS_RX_TIMEOUT;
+					if(this->available())
+					{
+						uint8_t c=this->read();
 
-                    if (modbus_in1_ptr >= sizeof(modbus_in1_buf)) {
-                        ESP_LOGD(TAG,"Buffer Overflow\n\r");
-                        modbus_state = MODBUS_STATE_CLEAR;
-                        break;
-                    }
+						ESP_LOGD(TAG, "Aus Task IV %02x ",c);
+						// restart timeout
+						modbus_time_cnt_1=MODBUS_RX_TIMEOUT;
 
-                    if (modbus_in1_ptr == 0 && c != 0x01) {
-                        break;
-                    }
+						// data in buffer
+						if(modbus_in1_ptr>=sizeof(modbus_in1_buf))
+						{
+							// buffer overflow
+							// ignore data
+							ESP_LOGD(TAG, "OV-Error IV\n\r");
+							modbus_state=MODBUS_STATE_IDLE; // next try to get data
+							break;
+						}
 
-                    if (modbus_in1_ptr == 1 && c != MODBUS_FC_READ_INPUT_REGS) {
-                        ESP_LOGD(TAG,"Wrong Command\n\r");
-                        modbus_in1_ptr = 0;
-                        modbus_crc_init(&modbus_crc16_1);
-                        break;
-                    }
+						if(!modbus_in1_ptr && c!=0x01) // 0x01 = ID
+						{
+							// ignore wrong chars at start of request
+							break;
+						}
 
-                    modbus_in1_buf[modbus_in1_ptr++] = c;
-        
-                    if(modbus_in1_ptr<7) {
-		                modbus_crc_add(c,&modbus_crc16_1);
-		               }
-        
-                    else if (modbus_in1_ptr == 8) {
-                        uint16_t res_crc = modbus_in1_buf[6];
-                        res_crc |= modbus_in1_buf[7] << 8;
+						if(modbus_in1_ptr==1 && c!=MODBUS_FC_READ_INPUT_REGS) // 
+						{
+							// ignore wrong chars at start of request
+							ESP_LOGD(TAG, "Wrong Command-Error IV %02X\n\r",c);
+							modbus_in1_ptr=0;
+							modbus_crc_init(&modbus_crc16_1);
+							break;
+						}
 
-                        if (res_crc == modbus_crc16_1) {
-                            if (modbus_in1_buf[1] == MODBUS_FC_READ_REGS || modbus_in1_buf[1] == MODBUS_FC_READ_INPUT_REGS) {
-                                addr = (modbus_in1_buf[2] << 8) + modbus_in1_buf[3];
-                                wr_len = (modbus_in1_buf[4] << 8) + modbus_in1_buf[5];
-                                modbus_state = MODBUS_STATE_WRITE;
-                                modbus_time_cnt_1 = MODBUS_WRITE_DELAY;
-                            } 
-                            else {
-                                ESP_LOGD(TAG,"FUNC-Error IV\n\r");
-                                modbus_state = MODBUS_STATE_CLEAR;
-                                break;
-                            }
-                        } 
-                        else {
-                            ESP_LOGD(TAG,"CRC-Error IV\n\r");
-                            modbus_state = MODBUS_STATE_CLEAR;
-                            break;
-                        }
-                    }
-                }
-            break;
+						modbus_in1_buf[modbus_in1_ptr++]=c;
+						if(modbus_in1_ptr<7)
+						{
+							modbus_crc_add(c,&modbus_crc16_1);
+						}
+						else if(modbus_in1_ptr==8)
+						{
+							// have received data, check CRC
+							uint16_t res_crc= modbus_in1_buf[6];
+							res_crc|=modbus_in1_buf[7]<<8;
+							if(res_crc==modbus_crc16_1)
+							{
+								if(modbus_in1_buf[1]==MODBUS_FC_READ_REGS || modbus_in1_buf[1]==MODBUS_FC_READ_INPUT_REGS)
+								{
+									// result crc matching
+									addr=(modbus_in1_buf[2]<<8)+modbus_in1_buf[3];
+									wr_len=(modbus_in1_buf[4]<<8)+modbus_in1_buf[5];
+									modbus_state=MODBUS_STATE_WRITE; // delay next read
+									modbus_time_cnt_1=MODBUS_WRITE_DELAY;
+								}
+								else
+								{
+									ESP_LOGD(TAG, "FUNC-Error IV\n\r");
+									modbus_state=MODBUS_STATE_CLEAR; // next read
+									break;
+								}
+							}
+							else
+							{
+								// crc-error
+								ESP_LOGD(TAG,"CRC-Error IV\n\r");
+								modbus_state=MODBUS_STATE_CLEAR; // next read
+								break;
+							}
+						}
+					}
+					break;
 
             case MODBUS_STATE_WRITE:
                 if (!modbus_time_cnt_1) {
@@ -259,21 +279,23 @@ void SDM630Modbus::task_iv() {
                 addr++;
                 wr_len--;
             }
-            this->write((modbus_crc16_1 & 0x00FF)); // crc high
-		    this->write((modbus_crc16_1>>8)); // crc low
+            this->write(modbus_crc16_1 & 0x00FF); // crc high
+		    this->write(modbus_crc16_1>>8); // crc low
             // Nächsten Zustand setzen
             modbus_state = MODBUS_STATE_DELAY_TO_IDLE;
             }
             break;
 
         case MODBUS_STATE_DELAY_TO_IDLE:
-            if (millis() > modbus_timer_1) {
-                if (this->flow_control_pin_ != nullptr) {
-                    this->flow_control_pin_->digital_write(false); // TXE auf LOW
-                }
-                modbus_state = MODBUS_STATE_IDLE; // nächsten Versuch starten
-            }
-            break;
+            if(millis()>modbus_timer_1)
+			    {
+				   // Schalte den Transmitter ein (Flow Control Pin)
+                    if (this->flow_control_pin_ != nullptr) {
+                        this->flow_control_pin_->digital_write(false);
+                    }
+					modbus_state=MODBUS_STATE_IDLE; // next try to get data
+				}
+			break;
     }
     }
 }
