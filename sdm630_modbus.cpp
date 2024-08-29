@@ -243,9 +243,10 @@ void SDM630Modbus::write_array(const uint8_t *data, size_t length) {
 }
 
 void SDM630Modbus::mqtt_message_received(const std::string &topic, float value) {
-    if (topic.find("sensor/SDMEmulator") != std::string::npos) {
-        ESP_LOGI(TAG, "Received MQTT message: %s with value: %f", topic.c_str(), value);
-        v_sum = value;
+    if (topic == "sensor/SDMEmulator") {
+        if (v_sum != value) {  // Nur aktualisieren, wenn der Wert sich geändert hat.
+            v_sum = value;
+        }
     }
 }
 
