@@ -60,10 +60,7 @@ class SDM630Modbus : public uart::UARTDevice, public Component {
   volatile uint8_t modbus_state;
   GPIOPin *flow_control_pin_{nullptr}; // Pin zur Steuerung des Datenflusses
   std::vector<uint8_t> rx_buffer; // Puffer für eingehende Daten
-  void send_modbus_response(uint8_t *data, size_t length);
-  size_t prepare_response_data(uint8_t *buffer, uint16_t addr, uint16_t wr_len);
-  void process_modbus_request();
- 
+
  private:
 
   uint32_t modbus_rest_delay=0;
