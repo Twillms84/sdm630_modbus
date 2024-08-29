@@ -8,21 +8,17 @@ static const char *TAG = "sdm630_modbus.component";
 
 // Setup-Methode
 void SDM630Modbus::setup() {
-    ESP_LOGI(TAG, "Setting up SDM630 Modbus component");
     if (this->flow_control_pin_ != nullptr) {
-        ESP_LOGI(TAG, "Initializing flow control pin");
         this->flow_control_pin_->setup();
         this->flow_control_pin_->digital_write(false); // TXE auf LOW
     }
     this->init();
     
     if (ivHandle != nullptr) {
-        ESP_LOGI(TAG, "Deleting existing task");
         vTaskDelete(ivHandle);
     }
     
     vTaskDelay(pdMS_TO_TICKS(1)); // Verzögerung hinzufügen
-    ESP_LOGI(TAG, "Creating Modbus task");
     xTaskCreate(task_iv_static, "ModbusIV", 5000, this, 1, &ivHandle);
 }
 
@@ -30,12 +26,10 @@ void SDM630Modbus::loop() {
 }
 
 void SDM630Modbus::init() {
-    ESP_LOGI(TAG, "Initialization called");
     this->modbus_reset();  // Füge den Reset-Aufruf hinzu
 }
 
 void SDM630Modbus::modbus_reset() {
-    ESP_LOGI(TAG, "Modbus reset called");
 	// reset the Modbus pointer and set to read
 	modbus_state = MODBUS_STATE_IDLE;
 	modbus_in_buffer_ptr = 0;
@@ -43,7 +37,6 @@ void SDM630Modbus::modbus_reset() {
 }
 
 void SDM630Modbus::modbus_rest(void) {
-    ESP_LOGI(TAG, "Modbus rest called");
 	modbus_rest_delay = ((50000) / 9600) + 2; // 5 Chars 10 Bits for ms (1000/s)+ 2ms
 	modbus_state = MODBUS_STATE_REST;
 	modbus_rest_time = millis() + modbus_rest_delay;
@@ -52,11 +45,9 @@ void SDM630Modbus::modbus_rest(void) {
 // Statische Methode für den FreeRTOS-Task
 void SDM630Modbus::task_iv_static(void *parameter) {
     SDM630Modbus *modbus = static_cast<SDM630Modbus*>(parameter);
-    ESP_LOGI(TAG, "Task IV started");
 
     while (true) {
         modbus->task_iv();
-        vTaskDelay(pdMS_TO_TICKS(10)); // Verzögerung zur Reduzierung der CPU-Belastung
     }
 }
 
@@ -83,7 +74,6 @@ void SDM630Modbus::modbus_crc_add(uint8_t v, uint16_t *crc) {
 }
 
 void SDM630Modbus::task_iv() {
-    ESP_LOGI(TAG, "Starting Modbus task");
 
     static uint16_t addr;
     static uint16_t wr_len;
@@ -101,7 +91,6 @@ void SDM630Modbus::task_iv() {
 
         switch (modbus_state) {
             case MODBUS_STATE_CLEAR:
-                ESP_LOGI(TAG, "MODBUS STATE: CLEAR");
                 while (this->available()) {
                     this->read();
                 }
@@ -109,7 +98,6 @@ void SDM630Modbus::task_iv() {
                 break;
 
             case MODBUS_STATE_IDLE:
-                ESP_LOGI(TAG, "MODBUS STATE: IDLE");
                 if (this->available()) {
                     modbus_state = MODBUS_STATE_READ;
                     modbus_time_cnt_1 = MODBUS_RX_TIMEOUT;
@@ -127,7 +115,6 @@ void SDM630Modbus::task_iv() {
 
                 if (this->available()) {
                     uint8_t c = this->read();
-                    ESP_LOGD(TAG, "Received byte: %02x", c);
 
                     modbus_time_cnt_1 = MODBUS_RX_TIMEOUT;  // Reset timeout
 
@@ -172,7 +159,6 @@ void SDM630Modbus::task_iv() {
                 break;
 
             case MODBUS_STATE_WRITE:
-                ESP_LOGI(TAG, "MODBUS STATE: WRITE");
                 if (!modbus_time_cnt_1) {
                     if (this->flow_control_pin_ != nullptr) {
                         this->flow_control_pin_->digital_write(true);
@@ -188,7 +174,6 @@ void SDM630Modbus::task_iv() {
                     while (wr_len) {
                         switch (addr) {
                             case 0x0c:
-                                ESP_LOGI(TAG, "Sending v_sum: %0.2f", v_sum);
                                 modbus_uart1_send(((uint8_t*)&v_sum)[3]);
                                 modbus_uart1_send(((uint8_t*)&v_sum)[2]);
                                 modbus_uart1_send(((uint8_t*)&v_sum)[1]);
@@ -197,7 +182,6 @@ void SDM630Modbus::task_iv() {
                                 wr_len--;
                                 break;
                             case 0x0e:
-                                ESP_LOGI(TAG, "Sending modbus_l2 as zeros");
                                 modbus_uart1_send(0);
                                 modbus_uart1_send(0);
                                 modbus_uart1_send(0);
@@ -206,7 +190,6 @@ void SDM630Modbus::task_iv() {
                                 wr_len--;
                                 break;
                             case 0x10:
-                                ESP_LOGI(TAG, "Sending modbus_l3 as zeros");
                                 modbus_uart1_send(0);
                                 modbus_uart1_send(0);
                                 modbus_uart1_send(0);
@@ -215,7 +198,6 @@ void SDM630Modbus::task_iv() {
                                 wr_len--;
                                 break;
                             default:
-                                ESP_LOGW(TAG, "Sending default zeros");
                                 modbus_uart1_send(0);
                                 modbus_uart1_send(0);
                                 break;
@@ -230,7 +212,6 @@ void SDM630Modbus::task_iv() {
                 break;
 
             case MODBUS_STATE_DELAY_TO_IDLE:
-                ESP_LOGI(TAG, "MODBUS STATE: DELAY_TO_IDLE");
                 if (millis() > modbus_timer_1) {
                     if (this->flow_control_pin_ != nullptr) {
                         this->flow_control_pin_->digital_write(false);
@@ -251,13 +232,11 @@ uint8_t SDM630Modbus::read() {
 }
 
 void SDM630Modbus::modbus_uart1_send(uint8_t data) {
-    ESP_LOGD(TAG, "Sending byte: %02x", data);
     modbus_crc_add(data, &modbus_crc16_1);
     this->write(data);
 }
 
 void SDM630Modbus::write_array(const uint8_t *data, size_t length) {
-    ESP_LOGI(TAG, "Writing array of length: %zu", length);
     for (size_t i = 0; i < length; ++i) {
         this->write(data[i]);
     }

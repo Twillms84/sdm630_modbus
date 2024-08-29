@@ -8,7 +8,6 @@
 #include <freertos/task.h>
 
 // Modbus-Zustandsdefinitionen
-#define MODBUS_STATE_IDLE 0
 #define MODBUS_STATE_IDLE			0
 #define MODBUS_STATE_READ			1
 #define MODBUS_STATE_REST   		2
@@ -63,8 +62,10 @@ class SDM630Modbus : public uart::UARTDevice, public Component {
   std::vector<uint8_t> rx_buffer; // Puffer für eingehende Daten
 
  private:
+
   uint32_t modbus_rest_delay=0;
   uint32_t modbus_rest_time=0;
+
   // Private Methoden und Member-Variablen
   static void task_iv_static(void *parameter); // Statische Methode für den Task
   TaskHandle_t ivHandle; // Handle für den FreeRTOS-Task
@@ -76,20 +77,12 @@ class SDM630Modbus : public uart::UARTDevice, public Component {
   void modbus_crc_init(uint16_t *crc);
   void modbus_crc_add(uint8_t v, uint16_t *crc);
   void modbus_uart1_send(uint8_t data);
+
   // Gibt die Anzahl der verfügbaren Bytes zurück
   size_t available();
 
   // Liest ein Byte vom UART
   uint8_t read();
-
-  // Berechnet das CRC für die Daten
-  uint16_t calc_crc(uint8_t* data, uint8_t length);
-
-  // Konvertiert ein Hex-Array in einen String
-  std::string hex_to_string(const uint8_t *data, size_t length);
-
-  // Speicher für die Register-Werte
-  uint8_t registers[160]; // Beispiel: Platz für bis zu 160 Register-Werte
   
   // Modbus-Zustandsvariablen
   uint8_t modbus_time_cnt_1 = 0;
@@ -106,9 +99,6 @@ class SDM630Modbus : public uart::UARTDevice, public Component {
   
   // Globale Variablen
   float v_sum;
-  float modbus_l1;
-  float modbus_l2;
-  float modbus_l3;
   float modbus_auto_offset;
   
 };
